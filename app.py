@@ -61,7 +61,7 @@ PANEL_ALPHA = 0.55                       # opacidad del panel oscuro sobre el fo
 FOTO_OSCURECER = 0.25                    # velo oscuro sobre la foto
 VIDEO_INICIO = "Multimedia/nasa.mp4"     # video de fondo de la portada
 VIDEO_PROYECTO = "Multimedia/presentacion.mp4"   # video de presentación (vista "video")
-PITCH_URL = "https://www.youtube.com/watch?v=PH9TjoZ9zuE"   # TODO: enlace al pitch oficial de Black Hole_Sun
+PITCH_URL = "https://youtu.be/4oYazMd5A3w?feature=shared"   # TODO: enlace al pitch oficial de Black Hole_Sun
 LOGO_NASA = "Multimedia/logo-nasa.jpg"
 LOGO_EQUIPO = "Multimedia/logo-equipo.png"
 APP_URL = "https://spherexnasa-spaceappschallenge.streamlit.app"                             # URL pública de la app (para "Copiar enlace"); vacío = autodetectar
