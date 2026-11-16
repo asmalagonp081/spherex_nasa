@@ -5,11 +5,13 @@ Vistas (st.session_state["vista"]):
     portada  ->  hub  ->  mision | video | explorador
 Ejecutar:  streamlit run app.py
 """
+# --------------------------------------------------------------------
+# Librerías
+# --------------------------------------------------------------------
 import io, os, re, time, base64, warnings, logging, html, mimetypes
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, datetime, timezone
 from urllib.parse import quote_plus, quote, urlencode
-
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -31,14 +33,15 @@ from reproject import reproject_interp
 
 logging.getLogger("astropy").setLevel(logging.ERROR)
 conf.remote_timeout = 120
-Irsa.ROW_LIMIT = 10000
+Irsa.ROW_LIMIT = 1000
 warnings.filterwarnings("ignore")
 
 PIX = 6.15  # arcsec/pixel de SPHEREx
 BANDS = {1: (0.75, 1.11), 2: (1.11, 1.64), 3: (1.64, 2.42),
-         4: (2.42, 3.82), 5: (3.82, 4.42), 6: (4.42, 5.00)}
+         4: (2.42, 3.82), 5: (3.82, 4.42), 6: (4.42, 5.00)} #micrometros
 ZOOMS = [1, 1.5, 2, 3, 4, 6, 8]
 OUT = 512
+COORD_DECIMALS = 4 # Coordenadas iguales hasta 4 decimales (~0.36") cuentan como el mismo campo
 
 st.set_page_config(page_title="SxMOV · SPHEREx Moving Object Visualizer", page_icon="🔭",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -50,7 +53,7 @@ try:
     _components.html("""<script>
     try {
       const d = window.parent.document;
-      d.documentElement.lang = "es";
+      d.documentElement.lang = "en"; 
       d.documentElement.setAttribute("translate", "no");
       d.documentElement.classList.add("notranslate");
       if (!d.querySelector('meta[name="google"][content="notranslate"]')) {
@@ -60,8 +63,10 @@ try:
     </script>""", height=0)
 except Exception:
     pass
-
-# ================================================================ CONFIGURACIÓN EDITABLE
+# ================================================================ 
+# Elementos configurables del diseño de la página
+# ================================================================ 
+# ================================================================ 
 # Todas las rutas son relativas a la carpeta de app.py (o absolutas). Si un archivo no existe,
 # la interfaz usa un respaldo visual sin mostrar avisos ni rutas.
 FOTO_EQUIPO = "foto_equipo.jpg"          # fondo de las vistas internas (opcional)
@@ -72,10 +77,10 @@ VIDEO_PROYECTO = "Multimedia/presentacion.mp4"   # video de presentación (vista
 PITCH_URL = "https://www.youtube.com/"   # TODO: enlace al pitch oficial de Black Hole_Sun
 LOGO_NASA = "Multimedia/logo-nasa.jpg"
 LOGO_EQUIPO = "Multimedia/logo-equipo.png"
-APP_URL = ""                             # URL pública de la app (para "Copiar enlace"); vacío = autodetectar
+APP_URL = "https://spherexnasa-spaceappschallenge.streamlit.app"                             # URL pública de la app (para "Copiar enlace"); vacío = autodetectar
 CONTACTO = {                             # TODO: completar con los datos reales del equipo
     "Equipo": "Black Hole_Sun",
-    "Correo": "contacto@ejemplo.com",
+    "Correo": "saramirez@udistrital.edu.co",
     "Sede": "NASA International Space Apps Challenge — Bogotá, Colombia",
 }
 MISION_MEDIA = {                         # imágenes opcionales de la vista "Misión"
@@ -93,7 +98,7 @@ HORIZONS_URL = "https://ssd.jpl.nasa.gov/horizons/app.html"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-
+# Se utiliza para buscar los archivos anteriormente definidos en la carpeta de app.py y sus subcarpetas, ignorando mayúsculas/minúsculas y probando extensiones de imagen comunes.
 def _abs(p):
     """Resuelve la ruta y es tolerante: ignora mayúsculas/minúsculas y prueba extensiones
     (.jpg/.jpeg/.png/.webp), también buscando en la carpeta de app.py si no está en su subcarpeta."""
@@ -155,11 +160,12 @@ def st_image(path, **kw):
 # ================================================================ ESTADO Y NAVEGACIÓN
 qp = st.query_params
 EXP_DEFAULTS = dict(target="M81", band=1, how="Nombre (SIMBAD)", ra_in=148.88822, dec_in=69.06529,
-                    auto_rel=True, deep=False, use_gaia=False, maglim=18.0, area=90000,
+                    auto_rel=True, deep=False, use_gaia=False, overlay=True, maglim=18.0, area=90000,
                     mode_lbl="Banda individual", all_dets=False, stretch="lineal", neg=False,
                     bgsub=True, r_ap=12, rng=(date(2025, 3, 11), date.today()), gap=3.0,
-                    maxn=40, ms=700, mark=True)
+                    maxn=30, ms=700, mark=True)
 
+# inicia todos los controles del explorador definidos en EXP_DEFAULTS, y mantiene sus valores al navegar entre vistas
 if "vista" not in st.session_state:
     st.session_state["vista"] = "explorador" if "target" in qp else "portada"
     if "target" in qp:
@@ -385,7 +391,10 @@ def topnav():
             col.button(lbl, key=f"nav_{k}", on_click=ir, args=(k,), type="primary" if v == k else "secondary")
 
 
-# ================================================================ VISTA 1 · PORTADA
+# ===================================================================================
+# PORTADA - VISTA 1 
+# ===================================================================================
+
 def vista_portada():
     _stars = [("radial-gradient(1px 1px at 40px 60px,#fff,transparent)", 300),
               ("radial-gradient(1px 1px at 200px 150px,#cfe8ff,transparent)", 300),
@@ -467,11 +476,12 @@ def vista_portada():
             except TypeError:
                 st.video(_vpath)
     with st.container(key="start_wrap"):
-        st.button("▶  INICIAR EXPERIENCIA / EXPLORAR HUB →", key="start_btn", type="primary", on_click=ir, args=("hub",))
+        st.button("▶  START EXPERIENCE →", key="start_btn", type="primary", on_click=ir, args=("hub",))
     st.markdown(footer_html(60, "NASA Space Apps Challenge — Sede Bogotá"), unsafe_allow_html=True)
 
-
-# ================================================================ VISTA 2 · HUB
+# ===================================================================================
+# VISTA 2 - HUB
+# ===================================================================================
 def vista_hub():
     st.markdown(H("""<div style="text-align:center; margin:.4rem 0 1.6rem;">
         <div class="kicker">CENTRO DE MANDO</div>
@@ -492,8 +502,10 @@ def vista_hub():
                             unsafe_allow_html=True)
                 st.button("ENTRAR →", key=f"enter_{k}", on_click=ir, args=(k,))
 
+# ===================================================================================
+# VISTA 3 - DETALLES DE LA MISIÓN SPHEREX
+# ===================================================================================
 
-# ================================================================ VISTA 3 · MISIÓN
 def media_slot(key, caption):
     rel = MISION_MEDIA.get(key, "")
     if rel and os.path.exists(_abs(rel)):
@@ -561,8 +573,10 @@ def vista_mision():
         unsafe_allow_html=True)
     st.button("🔭 Ver cómo SxMOV usa estos datos →", key="mision_to_exp", type="primary", on_click=ir, args=("explorador",))
 
+# ===================================================================================
+# VISTA 4 - VIDEO DE PRESENTACIÓN DEL PROYECTO
+# ===================================================================================
 
-# ================================================================ VISTA 4 · VIDEO
 def vista_video():
     st.markdown(H("""<div class="kicker">PRESENTACIÓN · BLACK HOLE_SUN</div>
         <div class="exp-title">SxMOV en acción</div>"""), unsafe_allow_html=True)
@@ -588,8 +602,10 @@ def vista_video():
     st.write("")
     st.button("🔭 Probar el explorador →", key="video_to_exp", type="primary", on_click=ir, args=("explorador",))
 
+# ===================================================================================
+# VISTA 5 - EXPLORADOR DE DATOS SPHEREx
+# ===================================================================================
 
-# ================================================================ HELPERS CIENTÍFICOS (sin cambios)
 @st.cache_data(ttl=3600)
 def list_releases():
     try:
@@ -597,7 +613,7 @@ def list_releases():
         names = sorted(str(c) for c in t["collection"])
     except Exception:
         names = ["spherex_dr1", "spherex_dr1_deep", "spherex_qr3", "spherex_qr3_deep"]
-    return [n for n in names if re.fullmatch(r"spherex_(dr|qr)\d+", n)]
+    return [n for n in names if re.fullmatch(r"spherex_(dr|qr)\d+(_deep)?", n)]
 
 
 def latest(names):
@@ -610,7 +626,7 @@ def latest(names):
 
 
 def _simbad_astroquery(name):
-    """SIMBAD vía astroquery. Se evita la consulta a /capabilities (404) y se prueban los dos espejos oficiales."""
+    """SIMBAD through astroquery. The hard limit is set by hand to avoid the /capabilities 404."""
     last = None
     for server in ("simbad.cds.unistra.fr", "simbad.cfa.harvard.edu"):
         try:
@@ -798,14 +814,80 @@ def aperture_flux(data, x, y, scale, r_ap, r_in, r_out):
     return s * 1e9 * (scale / 206265.0) ** 2  # MJy/sr -> mJy
 
 
+GAIA_COLS = ["ra", "dec", "pmra", "pmdec", "phot_g_mean_mag"]
+VIZIER_TAPS = ("https://tapvizier.cds.unistra.fr/TAPVizieR/tap", "https://vizier.cfa.harvard.edu/TAPVizieR/tap")
+
+
+def _gaia_irsa(ra, dec, rad, maglim):
+    """Consulta Gaia DR3 desde el servicio TAP de IRSA."""
+    cats = Irsa.list_catalogs(filter="gaia")
+    name = next((k for k, v in cats.items() if "dr3" in (k + v).lower() and "source" in (k + v).lower()), None)
+    if name is None:
+        raise RuntimeError("no Gaia DR3 table at IRSA")
+    q = (f"SELECT TOP 2000 ra, dec, pmra, pmdec, phot_g_mean_mag FROM {name} "
+         f"WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{rad})) "
+         f"AND phot_g_mean_mag < {maglim} ORDER BY phot_g_mean_mag")
+    return Irsa.query_tap(q).to_table().to_pandas()
+
+
+def _gaia_vizier_tap(url):
+    """Genera una función de consulta para los espejos TAP de VizieR (CDS y Harvard CfA)."""
+    def fetch(ra, dec, rad, maglim):
+        import pyvo
+        q = ('SELECT TOP 2000 RA_ICRS, DE_ICRS, pmRA, pmDE, Gmag FROM "I/355/gaiadr3" '
+             f"WHERE 1=CONTAINS(POINT('ICRS',RA_ICRS,DE_ICRS),CIRCLE('ICRS',{ra},{dec},{rad})) "
+             f"AND Gmag < {maglim} ORDER BY Gmag")
+        df = pyvo.dal.TAPService(url).run_sync(q).to_table().to_pandas()
+        df.columns = [c.lower() for c in df.columns]
+        return df.rename(columns={"ra_icrs": "ra", "de_icrs": "dec", "pmde": "pmdec", "gmag": "phot_g_mean_mag"})
+    return fetch
+
+
+def _gaia_mast(ra, dec, rad, maglim):
+    """Consulta Gaia DR3 a través de MAST (archive.stsci.edu)."""
+    from astroquery.mast import Catalogs
+    try:
+        Catalogs.TIMEOUT = 30
+    except Exception:
+        pass
+    t = Catalogs.query_region(SkyCoord(ra * u.deg, dec * u.deg), radius=rad * u.deg, catalog="Gaia", version=3)
+    df = t.to_pandas(); df.columns = [c.lower() for c in df.columns]
+    return df[df.phot_g_mean_mag < maglim].nsmallest(2000, "phot_g_mean_mag")
+
+
+def _gaia_esa(ra, dec, rad, maglim):
+    """Consulta Gaia DR3 directamente en el archivo de la ESA."""
+    from astroquery.gaia import Gaia
+    q = ("SELECT TOP 2000 ra, dec, pmra, pmdec, phot_g_mean_mag FROM gaiadr3.gaia_source "
+         f"WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{rad})) "
+         f"AND phot_g_mean_mag < {maglim} ORDER BY phot_g_mean_mag")
+    return Gaia.launch_job(q).get_results().to_pandas()
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def gaia_stars(ra, dec, rad_deg, maglim):
-    from astroquery.gaia import Gaia
-    q = (f"SELECT TOP 2000 ra, dec, pmra, pmdec, phot_g_mean_mag FROM gaiadr3.gaia_source "
-         f"WHERE 1=CONTAINS(POINT('ICRS',ra,dec),CIRCLE('ICRS',{ra},{dec},{rad_deg})) "
-         f"AND phot_g_mean_mag < {maglim} ORDER BY phot_g_mean_mag")
-    return Gaia.launch_job(q).get_results().to_pandas().fillna(0.0)
-
+    """Consulta de cono en Gaia DR3. Lanza las 5 fuentes en paralelo; la primera en responder gana.
+    Devuelve la tupla: (DataFrame, nombre_del_servidor)."""
+    sources = [("IRSA", _gaia_irsa), ("VizieR (CDS)", _gaia_vizier_tap(VIZIER_TAPS[0])),
+               ("VizieR (CfA)", _gaia_vizier_tap(VIZIER_TAPS[1])), ("MAST", _gaia_mast), ("ESA", _gaia_esa)]
+    ex = ThreadPoolExecutor(len(sources))
+    futs = {ex.submit(fn, ra, dec, rad_deg, maglim): name for name, fn in sources}
+    errors = []
+    try:
+        for f in as_completed(futs, timeout=60):
+            try:
+                df = f.result()[GAIA_COLS].copy()
+                for c in ("pmra", "pmdec"):
+                    df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+                df = df.dropna(subset=["ra", "dec", "phot_g_mean_mag"]).astype(float)
+                return df, futs[f]
+            except Exception as e:
+                errors.append(f"{futs[f]}: {str(e)[:80]}")
+    except Exception:
+        errors.append("timeout after 60 s")
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+    raise RuntimeError(" | ".join(errors))
 
 def make_frames(items, mode, band, bgsub):
     frames = []
@@ -832,15 +914,50 @@ def make_frames(items, mode, band, bgsub):
     return frames
 
 
+def crop_limits(n, zoom):
+    """Calcula los índices de recorte [x0, x1] según el nivel de zoom."""
+    half = max(4, int(n / zoom / 2)); c = n // 2
+    return max(0, c - half), min(n, c + half)
+
+
+def gaia_at_epoch(gaia, mjd):
+    """Propaga las posiciones de Gaia (época 2016.0) a la fecha del cuadro usando movimientos propios."""
+    dt = 2000 + (mjd - 51544.5) / 365.25 - 2016.0
+    ra = gaia.ra + gaia.pmra * dt / 3.6e6 / np.cos(np.deg2rad(gaia.dec))
+    dec = gaia.dec + gaia.pmdec * dt / 3.6e6
+    return ra.values, dec.values
+
+
+def sky_to_display(wcs, ra, dec, x0, x1):
+    """Convierte coordenadas celestes (RA, Dec) a coordenadas de píxel en el lienzo de salida (512x512)."""
+    px, py = wcs.world_to_pixel_values(ra, dec)
+    w = x1 - x0; s = OUT / w
+    return (px - x0 + 0.5) * s, (w - (py - x0) - 0.5) * s
+
+
+def draw_extras(im, label, mark, width_arcsec):
+    """Dibuja la barra de escala angular, la cruz central y la etiqueta de fecha sobre la imagen."""
+    d = ImageDraw.Draw(im)
+    bar = max([b for b in (10, 20, 30, 60, 120, 300, 600, 1200) if b <= 0.4 * width_arcsec] or [10])
+    L = bar / width_arcsec * OUT
+    d.line([10, OUT - 14, 10 + L, OUT - 14], fill=(255, 220, 0), width=3)
+    d.text((10, OUT - 30), f'{bar}" ({width_arcsec:.0f}" lado)', fill=(255, 220, 0))
+    if mark:
+        d.line([OUT / 2 - 14, OUT / 2, OUT / 2 - 5, OUT / 2], fill=(255, 60, 60), width=2)
+        d.line([OUT / 2 + 5, OUT / 2, OUT / 2 + 14, OUT / 2], fill=(255, 60, 60), width=2)
+    d.text((8, 8), label, fill=(255, 220, 0))
+    return im
+
+
 def render(frame, lim, stretch, neg, zoom, diff, wcs, gaia, maglim, mark):
-    a = frame["arr"]; n = a.shape[0]
-    half = max(4, int(n / zoom / 2)); c = n // 2; x0 = max(0, c - half); x1 = min(n, c + half)
+    """Renderiza un cuadro de SPHEREx (opcionalmente con círculos de Gaia superpuestos)."""
+    a = frame["arr"]; x0, x1 = crop_limits(a.shape[0], zoom)
     sub = a[x0:x1, x0:x1]
     if diff:
         x = 0.5 + 0.5 * np.clip(sub / lim[1], -1, 1)
     else:
         x = np.clip((sub - lim[0]) / (lim[1] - lim[0] + 1e-12), 0, 1)
-        if stretch == "raíz":
+        if stretch in ("raíz", "sqrt"):
             x = np.sqrt(x)
         elif stretch == "asinh":
             x = np.arcsinh(10 * x) / np.arcsinh(10)
@@ -850,28 +967,43 @@ def render(frame, lim, stretch, neg, zoom, diff, wcs, gaia, maglim, mark):
     if neg:
         x = 1 - x
     im = Image.fromarray(np.flipud((x * 255).astype(np.uint8))).resize((OUT, OUT), Image.NEAREST).convert("RGB")
-    d = ImageDraw.Draw(im); w = x1 - x0; s = OUT / w
     if gaia is not None and len(gaia):
-        dt = 2000 + (frame["mjd"] - 51544.5) / 365.25 - 2016.0
-        ra = gaia.ra + gaia.pmra * dt / 3.6e6 / np.cos(np.deg2rad(gaia.dec))
-        dec = gaia.dec + gaia.pmdec * dt / 3.6e6
-        px, py = wcs.world_to_pixel_values(ra.values, dec.values)
-        for X, Y, G in zip(px, py, gaia.phot_g_mean_mag):
-            X, Y = (X - x0 + 0.5) * s, (w - (Y - x0) - 0.5) * s
-            if 0 <= X < OUT and 0 <= Y < OUT:
-                r = max(3, 3 + (maglim - G) * 0.9)
-                d.ellipse([X - r, Y - r, X + r, Y + r], outline=(0, 200, 255))
-    if mark:
-        d.line([OUT / 2 - 12, OUT / 2, OUT / 2 - 5, OUT / 2], fill=(255, 60, 60))
-        d.line([OUT / 2 + 5, OUT / 2, OUT / 2 + 12, OUT / 2], fill=(255, 60, 60))
-    d.text((8, 8), f"{frame['label']}  ({frame['n']} img) {frame['note']}", fill=(255, 220, 0))
-    return im
+        d = ImageDraw.Draw(im)
+        X, Y = sky_to_display(wcs, *gaia_at_epoch(gaia, frame["mjd"]), x0, x1)
+        for xx, yy, g in zip(X, Y, gaia.phot_g_mean_mag):
+            if 0 <= xx < OUT and 0 <= yy < OUT:
+                r = max(6, 6 + (maglim - g) * 1.2)
+                d.ellipse([xx - r, yy - r, xx + r, yy + r], outline=(0, 255, 255), width=2)
+    return draw_extras(im, f"SPHEREx {frame['label']} ({frame['n']} img) {frame['note']}", mark, (x1 - x0) * PIX)
+
+
+def render_gaia(frame, n, zoom, neg, wcs, gaia, maglim, mark):
+    """Dibuja el mismo campo, mismas coordenadas y mismo recorte a partir del catálogo Gaia DR3 (banda G)."""
+    x0, x1 = crop_limits(n, zoom)
+    bg, fg = ((255, 255, 255), (0, 0, 0)) if neg else ((0, 0, 0), (255, 255, 255))
+    im = Image.new("RGB", (OUT, OUT), bg); d = ImageDraw.Draw(im)
+    X, Y = sky_to_display(wcs, *gaia_at_epoch(gaia, frame["mjd"]), x0, x1)
+    for xx, yy, g in zip(X, Y, gaia.phot_g_mean_mag):
+        if 0 <= xx < OUT and 0 <= yy < OUT:
+            r = max(1.5, 1.5 + (maglim - g) * 0.7)
+            d.ellipse([xx - r, yy - r, xx + r, yy + r], fill=fg)
+    return draw_extras(im, f"Gaia DR3 (banda G) en {frame['label']}", mark, (x1 - x0) * PIX)
 
 
 def to_gif(imgs, ms):
     buf = io.BytesIO()
     imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=ms, loop=0)
     return buf.getvalue()
+
+
+def show_frames(imgs, ms, name=None):
+    """Muestra una animación GIF (si hay más de 1 cuadro) con su botón de descarga, o una imagen fija."""
+    if len(imgs) > 1:
+        gif = to_gif(imgs, ms); st.image(gif)
+        if name:
+            st.download_button(f"Descargar {name}", gif, name, "image/gif", key=f"dl_{name}")
+    else:
+        st.image(imgs[0])
 
 
 def spectrum_gif(items, gids, labels, ms):
@@ -896,6 +1028,101 @@ def spectrum_gif(items, gids, labels, ms):
         plt.close(fig)
     return to_gif(imgs, ms)
 
+# ================================================================ TABLA DE CLASIFICACIÓN PERSISTENTE
+CLS_COLS = ["key", "ra_deg", "dec_deg", "fov_side_arcsec", "moving_object_votes", "no_moving_object_votes",
+            "total_votes", "last_updated_utc", "consensus"]
+LAST_COL = "I"
+KEY_RE = re.compile(r"^-?\d+[.,]\d+_-?\d+[.,]\d+_\d+$")
+LOCAL_CSV = "classifications.csv"
+
+
+def consensus(m, nm):
+    return "Moving object" if m > nm else ("No moving object" if nm > m else "Tie")
+
+
+@st.cache_resource
+def _worksheet():
+    """Conecta con Google Sheets si existen credenciales y librerías instaladas;
+    si falta gspread o falla la red, retorna None y usa el archivo CSV local sin romper la app."""
+    try:
+        # 1. Verificamos que existan las credenciales en .streamlit/secrets.toml
+        sa = dict(st.secrets["gcp_service_account"])
+        gs = st.secrets["gsheet"]["sheet_id"]
+        
+        # 2. Importamos las librerías DENTRO del bloque try para evitar ModuleNotFoundError
+        import gspread
+        from google.oauth2.service_account import Credentials
+        
+        # 3. Autenticamos y abrimos la hoja de cálculo
+        creds = Credentials.from_service_account_info(
+            sa, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        )
+        ws = gspread.authorize(creds).open_by_key(gs).sheet1
+        
+        # 4. Aseguramos que la primera fila tenga los encabezados correctos
+        first = ws.row_values(1)
+        if not first:
+            ws.update(values=[CLS_COLS], range_name=f"A1:{LAST_COL}1")
+        elif KEY_RE.match(first[0]):
+            ws.insert_row(CLS_COLS, 1)
+        return ws
+    except Exception:
+        return None
+
+def _clean(df):
+    for c in CLS_COLS:
+        if c not in df:
+            df[c] = ""
+    df = df[CLS_COLS].copy()
+    for c in ("ra_deg", "dec_deg"):
+        df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+    for c in ("fov_side_arcsec", "moving_object_votes", "no_moving_object_votes", "total_votes"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    df["consensus"] = [consensus(a, b) for a, b in zip(df.moving_object_votes, df.no_moving_object_votes)]
+    return df
+
+
+def load_votes():
+    ws = _worksheet()
+    if ws is not None:
+        vals = ws.get_all_values()
+        rows = [(r + [""] * len(CLS_COLS))[:len(CLS_COLS)] for r in vals[1:] if any(r)]
+        return _clean(pd.DataFrame(rows, columns=CLS_COLS))
+    try:
+        return _clean(pd.read_csv(LOCAL_CSV))
+    except Exception:
+        return _clean(pd.DataFrame(columns=CLS_COLS))
+
+
+def register_vote(ra, dec, side, moving):
+    key = f"{ra:.{COORD_DECIMALS}f}_{dec:.{COORD_DECIMALS}f}_{int(side)}"
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    ws = _worksheet()
+    if ws is not None:
+        try:
+            cell = ws.find(key, in_column=1)
+        except Exception:
+            cell = None
+        if cell:
+            row = (ws.row_values(cell.row) + [""] * len(CLS_COLS))
+            m = int(float(row[4] or 0)) + int(moving); nm = int(float(row[5] or 0)) + int(not moving)
+            ws.update(values=[[key, round(ra, 6), round(dec, 6), int(side), m, nm, m + nm, now, consensus(m, nm)]],
+                      range_name=f"A{cell.row}:{LAST_COL}{cell.row}")
+        else:
+            ws.append_row([key, round(ra, 6), round(dec, 6), int(side), int(moving), int(not moving), 1, now,
+                           consensus(int(moving), int(not moving))])
+        return
+    df = load_votes()
+    if (df["key"] == key).any():
+        i = df.index[df["key"] == key][0]
+        df.loc[i, "moving_object_votes"] += int(moving)
+        df.loc[i, "no_moving_object_votes"] += int(not moving)
+        df.loc[i, "total_votes"] += 1
+        df.loc[i, "last_updated_utc"] = now
+    else:
+        df.loc[len(df)] = [key, round(ra, 6), round(dec, 6), int(side), int(moving), int(not moving), 1, now, ""]
+    df["consensus"] = [consensus(a, b) for a, b in zip(df.moving_object_votes, df.no_moving_object_votes)]
+    df.to_csv(LOCAL_CSV, index=False)
 
 # ================================================================ GUÍA ASTROFÍSICA + ENLACES
 GUIA = {
@@ -1027,13 +1254,16 @@ def vista_explorador():
             if auto:
                 rel = latest(names)
                 st.caption("Usando: " + ", ".join(rel))
+                deep = st.checkbox("Incluir Campos Profundos (Deep Fields)", key="deep")
+                colls = tuple(rel + ([r + "_deep" for r in rel] if deep else []))
             else:
-                rel = st.multiselect("Publicaciones", names, key="rel_sel")
-            deep = st.checkbox("Incluir Campos Profundos (Deep Fields)", key="deep")
+                colls = tuple(st.multiselect("Publicaciones", names, key="rel_sel",
+                                             help="Incluye spherex_dr1_deep y spherex_qr3_deep (Deep Survey)."))
         with c3:
-            use_gaia = st.checkbox("Superponer Gaia (visible)", key="use_gaia")
-            maglim = st.slider("Mag. G límite", 10.0, 21.0, key="maglim", disabled=not use_gaia)
-    colls = tuple(rel + ([r + "_deep" for r in rel] if deep else []))
+            use_gaia = st.checkbox("Comparar con Gaia DR3 (visible)", key="use_gaia",
+                                   help="Muestra el mismo campo en Gaia DR3 junto a las imágenes de SPHEREx.")
+            overlay = st.checkbox("Superponer círculos de Gaia en SPHEREx", key="overlay", disabled=not use_gaia)
+            maglim = st.slider("Mag. G límite (Gaia)", 10.0, 21.0, key="maglim", disabled=not use_gaia)
 
     with tabs[1]:
         c1, c2, c3 = st.columns(3)
@@ -1057,7 +1287,8 @@ def vista_explorador():
             rng = st.date_input("Rango de fechas", key="rng")
             gap = st.slider("Separar épocas si el hueco > días", 0.5, 30.0, key="gap")
         with c2:
-            maxn = st.slider("Máx. imágenes a descargar", 5, 150, key="maxn")
+            # st.slider(etiqueta, valor_minimo, valor_maximo, key="maxn")
+            maxn = st.slider("Máx. imágenes a descargar", 5, 150, key="maxn")  # <--- AQUÍ: Ajusta el mínimo (5) y el máximo (150)
         with c3:
             ms = st.slider("Velocidad: tiempo entre imágenes [ms]", 100, 3000, step=100, key="ms")
             mark = st.checkbox("Marcar centro", key="mark")
@@ -1065,7 +1296,7 @@ def vista_explorador():
     with bar:
         qa, qb, qc = st.columns([4, 2.4, 1.3])
         qa.text_input("Nombre SIMBAD o RA/Dec", key="target", label_visibility="collapsed",
-                      placeholder="Nombre SIMBAD o RA/Dec  (ej. M81 · SS 433 · 148.888 69.065)")
+                      placeholder="Nombre SIMBAD o RA/Dec  (ej. Barnard's Star · M81 · 148.888 69.065)")
         band = qb.selectbox("Banda espectral", list(BANDS), key="band", label_visibility="collapsed", disabled=(mode == "sum"),
                             format_func=lambda b: f"Banda {b} ({BANDS[b][0]}–{BANDS[b][1]} µm)")
         go = qc.button("🔎 Analizar", type="primary", key="analizar")
@@ -1115,7 +1346,7 @@ def vista_explorador():
                 st.write(f"**Tipo de objeto:** {obj['info'].get('otype', '?')} – {obj['desc']}")
             st.dataframe(pd.DataFrame([obj["info"]]), hide_index=True)
 
-    # --- Buscar y descargar ---
+    # --- Buscar y descargar en IRSA (SPHEREx) ---
     sig = (colls, round(ra, 5), round(dec, 5), area, mode, band, all_dets, str(rng), gap, maxn, bgsub, r_ap)
     if go:
         if not colls:
@@ -1160,19 +1391,14 @@ def vista_explorador():
             items.append(dict(gid=int(r.gid), mjd=float(r.t_min), det=int(r.det), wave=res["wave"],
                               rp=rp, flux=flux, meta=res["meta"], uri=r.access_url))
         st.success(f"{len(items)}/{len(df)} cutouts descargados.")
-        gaia = None
-        if use_gaia:
-            try:
-                gaia = gaia_stars(round(ra, 5), round(dec, 5), side * 0.75 / 3600, maglim)
-            except Exception as e:
-                st.warning(f"Gaia no disponible: {e}")
-        ss["res"] = dict(items=items, wcs=w, gaia=gaia, sig=sig, zoom=0, rid=int(time.time() * 1000))
+        ss["res"] = dict(items=items, wcs=w, sig=sig, zoom=0, ra=ra, dec=dec, area=area, side=side,
+                         rid=int(time.time() * 1000))
 
     R = ss.get("res")
     if not R:
         st.info("Configura los parámetros y pulsa **Analizar**."); return
     if R["sig"] != sig:
-        st.warning("Cambiaste parámetros que afectan la descarga: pulsa de nuevo **Analizar**.")
+        st.warning("⚠️ Cambiaste parámetros (campo, banda, fechas…), pero las imágenes actuales corresponden a la búsqueda anterior. Pulsa **Analizar** para actualizar.")
 
     items = R["items"]
     if not items:
@@ -1181,8 +1407,22 @@ def vista_explorador():
     with st.container(key=f"res_{R['rid']}"):
         frames = make_frames(items, mode, band, bgsub)
         labels = [f["label"] for f in frames]
+        n_pix = frames[0]["arr"].shape[0]
 
-        # ---- GIF de imágenes ----
+        # --- Consulta dinámica a Gaia DR3 (en paralelo en 5 servidores) ---
+        gaia = None
+        if use_gaia:
+            try:
+                with st.spinner("Consultando Gaia DR3…"):
+                    gaia, gaia_src = gaia_stars(round(R["ra"], 5), round(R["dec"], 5), R["side"] * 0.75 / 3600, float(maglim))
+                st.caption(f"Servidor Gaia DR3 utilizado: **{gaia_src}** ({len(gaia)} estrellas encontradas)")
+                if len(gaia) == 0:
+                    st.info("Gaia no devolvió estrellas en este campo para el límite de magnitud elegido.")
+            except Exception as e:
+                st.warning(f"Gaia no está disponible en este momento: {e}")
+        has_gaia = gaia is not None and len(gaia) > 0
+
+        # ---- GIF de imágenes (SPHEREx | Gaia DR3) ----
         st.header("Imágenes fotométricas (cutouts FITS)")
         zc = st.columns([1, 1, 6])
         if zc[0].button("🔍 +"):
@@ -1190,7 +1430,7 @@ def vista_explorador():
         if zc[1].button("🔍 −"):
             R["zoom"] = max(0, R["zoom"] - 1)
         zoom = ZOOMS[R["zoom"]]
-        zc[2].caption(f"Zoom ×{zoom} · {side:.0f}″ × {side:.0f}″ ({area:,} arcsec²) · {len(frames)} épocas")
+        zc[2].caption(f"Zoom ×{zoom} · Campo generado: {R['side']:.0f}″ por lado ({R['area']:,} arcsec²) · {len(frames)} épocas")
         diffmode = st.selectbox("Mostrar", ["Imagen", "Restar época anterior", "Restar primera época"])
         stack = np.stack([f["arr"] for f in frames])
         if diffmode == "Imagen":
@@ -1199,15 +1439,23 @@ def vista_explorador():
             ref = (lambda i: frames[max(i - 1, 0)]["arr"]) if "anterior" in diffmode else (lambda i: frames[0]["arr"])
             frs = [dict(f, arr=f["arr"] - ref(i)) for i, f in enumerate(frames)]
             lim = (0, 3 * float(np.nanstd(np.stack([f["arr"] for f in frs])) + 1e-9))
-        imgs = [render(f, lim, stretch, neg, zoom, diffmode != "Imagen", R["wcs"], R["gaia"] if use_gaia else None, maglim, mark)
-                for f in frs]
-        if len(imgs) > 1:
-            gif = to_gif(imgs, ms); st.image(gif); st.download_button("Descargar GIF", gif, "spherex.gif", "image/gif")
+
+        imgs = [render(f, lim, stretch, neg, zoom, diffmode != "Imagen", R["wcs"],
+                       gaia if (has_gaia and overlay) else None, maglim, mark) for f in frs]
+
+        if has_gaia:
+            left, right = st.columns(2)
+            with left:
+                st.subheader("SPHEREx (infrarrojo cercano)")
+                show_frames(imgs, ms, "spherex.gif")
+            with right:
+                st.subheader("Gaia DR3 (visible)")
+                show_frames([render_gaia(f, n_pix, zoom, neg, R["wcs"], gaia, maglim, mark) for f in frames], ms, "gaia.gif")
+            st.caption("Ambos paneles muestran las mismas coordenadas y tamaño de campo, con las posiciones de Gaia propagadas "
+                       "según su movimiento propio a la fecha de cada cuadro. Los círculos cian en SPHEREx marcan las fuentes de Gaia. "
+                       "Un objeto en SPHEREx sin contraparte en Gaia, o que se desplaza entre cuadros, es candidato a objeto móvil.")
         else:
-            st.image(imgs[0])
-        if use_gaia:
-            st.caption("Círculos cian = fuentes Gaia (movidas con su movimiento propio a la fecha de cada cuadro). "
-                       "Un objeto SPHEREx sin círculo, o que se desplaza entre cuadros, es candidato a objeto móvil.")
+            show_frames(imgs, ms, "spherex.gif")
 
         # ---- Resta A−B ----
         st.header("Resta de dos épocas")
@@ -1228,6 +1476,57 @@ def vista_explorador():
         st.pyplot(fig); plt.close(fig)
         st.caption("Las estrellas fijas se cancelan; lo que queda (positivo en una época y negativo en la otra, "
                    "como un par) sugiere un objeto en movimiento. Usa la misma banda en ambas épocas.")
+
+        # ---- Imagen Diferencial en todas las épocas (Nuevo método de app_sin_interfaz.py) ----
+        st.subheader("Imagen diferencial (todas las épocas)")
+        if len(frames) < 2:
+            st.info("Se necesitan al menos dos épocas para calcular la imagen diferencial.")
+        else:
+            dc1, dc2, dc3 = st.columns(3)
+            refmode = dc1.selectbox("Referencia construida con las demás épocas", ["mediana", "media"],
+                                    help="La mediana es más robusta: un objeto móvil apenas contamina la referencia.")
+            ksigma = dc2.slider("Mostrar solo por encima de N × ruido (σ)", 1.0, 10.0, 3.0, 0.5)
+            dshow = dc3.selectbox("Visualización", ["Positivos y negativos", "Solo positivos"])
+            dframes = []
+            for i, f in enumerate(frames):
+                others = np.stack([g["arr"] for j, g in enumerate(frames) if j != i])
+                refim = np.nanmedian(others, axis=0) if refmode == "mediana" else np.nanmean(others, axis=0)
+                d = f["arr"] - refim
+                sig_i = 1.4826 * float(np.nanmedian(np.abs(d - np.nanmedian(d)))) + 1e-12  # Ruido robusto (MAD)
+                dframes.append(dict(f, arr=np.where(np.abs(d) > ksigma * sig_i, d, 0.0), sig=sig_i))
+            cmap_d = plt.get_cmap("RdBu_r")
+
+            def render_diff(f):
+                a = f["arr"]; x0, x1 = crop_limits(a.shape[0], zoom)
+                sub = np.nan_to_num(a[x0:x1, x0:x1] / (6 * f["sig"]))
+                if dshow.startswith("Solo"):
+                    rgb = (np.stack([np.clip(sub, 0, 1)] * 3, -1) * 255).astype(np.uint8)
+                else:
+                    rgb = (cmap_d(np.clip(0.5 + 0.5 * sub, 0, 1))[..., :3] * 255).astype(np.uint8)
+                im = Image.fromarray(np.flipud(rgb)).resize((OUT, OUT), Image.NEAREST)
+                if has_gaia and overlay:
+                    d_ = ImageDraw.Draw(im)
+                    X, Y = sky_to_display(R["wcs"], *gaia_at_epoch(gaia, f["mjd"]), x0, x1)
+                    for xx, yy, g in zip(X, Y, gaia.phot_g_mean_mag):
+                        if 0 <= xx < OUT and 0 <= yy < OUT:
+                            r_ = max(6, 6 + (maglim - g) * 1.2)
+                            d_.ellipse([xx - r_, yy - r_, xx + r_, yy + r_], outline=(0, 255, 255), width=2)
+                return draw_extras(im, f"Diferencia {f['label']} (>{ksigma:g}σ)", mark, (x1 - x0) * PIX)
+
+            dimgs = [render_diff(f) for f in dframes]
+            gl, gr = st.columns(2)
+            with gl:
+                st.markdown("**Una imagen de diferencia por época** (época − referencia de las demás)")
+                show_frames(dimgs, ms, "difference.gif")
+            with gr:
+                st.markdown("**Combinada**: residuo más intenso en todas las épocas")
+                comb = np.nanmax(np.stack([np.abs(f["arr"]) / (6 * f["sig"]) for f in dframes]), axis=0)
+                x0, x1 = crop_limits(comb.shape[0], zoom)
+                cim = Image.fromarray(np.flipud((np.clip(comb[x0:x1, x0:x1], 0, 1) * 255).astype(np.uint8)))
+                st.image(draw_extras(cim.resize((OUT, OUT), Image.NEAREST).convert("RGB"), "Residuos combinados", mark,
+                                     (x1 - x0) * PIX))
+            st.caption("Las estrellas fijas se cancelan al restar cada época de la combinación de las demás; solo quedan los píxeles "
+                       "que superan el umbral de ruido. Un objeto móvil aparece como una fuente que cambia de posición cuadro a cuadro.")
 
         # ---- Espectros ----
         st.header("Espectros por época")
@@ -1258,17 +1557,59 @@ def vista_explorador():
                 "- Lo más robusto es la **resta de imágenes**: lo que no se cancela es candidato. Luego se verifica con Gaia "
                 "y SIMBAD que no sea una fuente conocida.")
 
-        # ---- Metadatos ----
-        st.header("Metadatos / indicadores de contaminación")
+        # ---- Metadatos + Leyenda ----
+        st.header("Metadatos de imagen (encabezados FITS)")
         e = st.selectbox("Época", range(len(frames)), format_func=lambda i: labels[i], key="meta")
         rows = []
         for i in items:
             if i["gid"] == gids[e]:
                 rows.append({"detector": i["det"], "λ centro [µm]": round(i["wave"], 4), "flujo [mJy]": round(i["flux"], 3), **i["meta"]})
         st.dataframe(pd.DataFrame(rows), hide_index=True)
-        st.caption("N_* = píxeles marcados en el procesamiento L2; zodi_mediana = luz zodiacal (no restada en IMAGE); "
-                   "frac_NaN = píxeles sin datos.")
+        with st.expander("📖 Leyenda de columnas de metadatos e indicadores de contaminación"):
+            st.markdown("""
+| Columna | Significado |
+|---|---|
+| `detector` | Detector de SPHEREx (1–6); cada uno cubre una banda infrarroja. |
+| `λ centro [µm]` | Longitud de onda en el píxel del objetivo, obtenida del WCS espectral (varía a lo largo del detector). |
+| `flujo [mJy]` | Flujo en la apertura con fondo restado (calculado mediante un anillo exterior). |
+| `DETECTOR`, `OBSID` | Identificadores del detector y de la observación en el encabezado FITS. |
+| `DATE` | Fecha registrada en el encabezado FITS. |
+| `PSF_FWHM` | Ancho a media altura de la función de dispersión de punto (PSF). |
+| `VERSION` | Versión del procesamiento en el encabezado primario. |
+| `N_*` | Contadores de píxeles marcados en el procesamiento L2 (banderas de contaminación); `_NB` excluye píxeles malos y `_NS` excluye fuentes conocidas. |
+| `zodi_mediana` | Mediana del modelo de luz zodiacal en el recorte [MJy/sr]; **no** está restada de la imagen. |
+| `img_mediana` | Mediana del brillo superficial del recorte [MJy/sr]. |
+| `frac_NaN` | Fracción de píxeles sin datos en el recorte (0 = completo, 1 = vacío). |
+""")
 
+        # ---- Clasificación del campo (Nuevo método de app_sin_interfaz.py) ----
+        st.header("Clasifica este campo")
+        st.write("¿Observaste algún objeto moviéndose respecto a las estrellas de fondo en este campo de visión?")
+        key_now = f"{R['ra']:.{COORD_DECIMALS}f}_{R['dec']:.{COORD_DECIMALS}f}_{int(R['side'])}"
+        voted = ss.setdefault("voted", set())
+        b1, b2, _ = st.columns([1.2, 1.2, 3])
+        choice = None
+        if b1.button("✅ Objeto móvil presente", type="primary", key="vote_yes"):
+            choice = True
+        if b2.button("❌ Sin objeto móvil", key="vote_no"):
+            choice = False
+        if choice is not None:
+            if key_now in voted:
+                st.info("Ya clasificaste este campo durante esta sesión.")
+            else:
+                try:
+                    register_vote(R["ra"], R["dec"], R["side"], choice)
+                    voted.add(key_now)
+                    st.success("¡Gracias! Tu clasificación ha sido guardada.")
+                except Exception as ex:
+                    st.error(f"No se pudo guardar la clasificación: {ex}")
+        if _worksheet() is None:
+            st.caption("⚠️ No se encontraron credenciales de Google Sheets: los votos se guardan en un archivo CSV local (`classifications.csv`).")
+        votes = load_votes()
+        st.subheader("Tabla de clasificaciones de la comunidad")
+        st.dataframe(votes.drop(columns=["key"], errors="ignore").sort_values("total_votes", ascending=False)
+                     if len(votes) else votes, hide_index=True)
+        st.download_button("Descargar tabla (CSV)", votes.to_csv(index=False), "classifications.csv", "text/csv", key="dl_csv_votes")
 
 # ================================================================ DESPACHADOR
 VISTAS = {"hub": vista_hub, "mision": vista_mision, "video": vista_video, "explorador": vista_explorador}

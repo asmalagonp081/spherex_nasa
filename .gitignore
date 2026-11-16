@@ -1,0 +1,2 @@
+# Ignora todos los archivos con claves secretas, como credenciales de API, tokens de acceso, etc.
+.streamlit/secrets.toml
