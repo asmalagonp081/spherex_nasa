@@ -1,2 +1,11 @@
-# Ignora todos los archivos con claves secretas, como credenciales de API, tokens de acceso, etc.
+# Secretos: nunca subir
 .streamlit/secrets.toml
+
+# Archivos de prueba y temporales
+classifications.csv
+__pycache__/
+*.pyc
+
+# Entorno virtual
+.venv/
+venv/
